@@ -1,0 +1,108 @@
+#!/bin/bash
+
+# Purpose: Create a peristent USB from a live ISO
+# Dependencies: fdisk, parted, coreutils, e2fsprogs, util-linux
+# Usage: persistent-usb [path-to-iso]
+# Author: Arjen Balfoort
+# Date: 24-07-2021
+
+# Return values
+# 0: finished successfully
+# 1: no path to ISO provided
+# 2: path to ISO does not exist
+# 3: ISO cannot be made persistent
+# 4: device path not provided
+# 5: device path does not exist
+# 6: error creating persistent ISO
+
+# ISO path
+ISO=$1
+if [ -z ${ISO} ]; then
+    echo 'ISO path not provided'
+    exit 1
+elif [ ! -f "${ISO}" ]; then
+    echo "${ISO} does not exist."
+    exit 2
+fi
+
+# Check if ISO can be made persistent or is already persistent
+CANPERSIST=$(grep -a -m 1 -E 'quiet splash|splash quiet' ${ISO})
+if [ -z "${CANPERSIST}" ]; then
+    HASPERSIST=$(grep -a -m 1 'persistence' ${ISO})
+    if [ -z "${HASPERSIST}" ]; then
+        echo "${ISO} cannot be made persistent."
+        exit 3
+    fi
+fi
+
+# Be root to run this script
+if [ ${UID} -ne 0 ]; then
+    echo 'Please, type root password...'
+    su -c "$0 $@"
+    exit
+fi
+
+# Get the device
+DEVICES=$(ls /sys/block | grep -E 'sd[a-z]$')
+for D in ${DEVICES}; do
+    DETACHABLE=$(grep 1 "/sys/block/${D}/removable")
+    if [ ! -z "${DETACHABLE}" ]; then
+        echo
+        read -e -p 'Confirm USB device: ' -i "/dev/${D}" DEVICE
+        break
+    fi
+done
+
+if [ -z "${DEVICE}" ]; then
+    echo 'No device given.'
+    exit 4
+elif [ ! -e "${DEVICE}" ]; then
+    echo "${DEVICE} does not exist."
+    exit 5
+fi
+
+# Remove extension
+ISO="${ISO%.*}"
+
+# Rename existing peristent ISO
+if [ ! -z "${HASPERSIST}" ] && [ ! -f "${ISO}_persistent.iso" ]; then
+    mv "${ISO}.iso" "${ISO}_persistent.iso"
+fi
+
+# Replace "splash quiet" or "quiet splash" with "persistence " (note the extra space in persistence - 12chars)
+if [ ! -f "${ISO}_persistent.iso" ]; then
+    echo "Create persistent ISO: ${ISO}_persistent.iso..."
+    sed 's/splash quiet/persistence /;s/quiet splash/persistence /' <"${ISO}.iso" >"${ISO}_persistent.iso"
+fi
+
+# Something went wrong: cannot find the persistent ISO
+if [ ! -f "${ISO}_persistent.iso" ]; then
+    echo "Could not write ${ISO}_persistent.iso"
+    exit 6
+fi
+
+# Write the new ISO
+for MNT in $(mount | grep ${DEVICE} | awk '{print $1}'); do
+    umount -f ${MNT}
+done
+echo "Writing ${ISO}_persistent.iso to ${DEVICE}..."
+wipefs -af ${DEVICE}
+dd if="${ISO}_persistent.iso" of=${DEVICE} bs=64k oflag=dsync status=progress
+
+# Create a new partition
+echo 'Create a new ext4 partition...'
+fdisk ${DEVICE} <<<$'n\np\n\n\n\nw'
+partprobe -s ${DEVICE}
+mkfs.ext4 -L persistence ${DEVICE}3
+
+# Write persistence.conf
+MNT='/tmp/persistent-usb'
+mkdir -p ${MNT}
+mount ${DEVICE}3 ${MNT}
+echo '/ union' >${MNT}/persistence.conf
+sync
+umount -f ${MNT}
+rm -rf ${MNT}
+
+echo 'Persistent USB done!'
+exit 0
