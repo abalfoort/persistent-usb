@@ -7,4 +7,4 @@ persistent-usb will check if these arguments exist and quits when not found.
 
 Dependencies: fdisk, parted, coreutils, e2fsprogs, util-linux
 
-Usage: persistent-usb [path-to-iso]
+Usage: persistent-usb [path-to-iso] [optional-usb-device]
