@@ -4,7 +4,7 @@
 # Dependencies: fdisk, parted, coreutils, e2fsprogs, util-linux
 # Usage: persistent-usb [path-to-iso] [optional-usb-device]
 # Author: Arjen Balfoort
-# Date: 22-12-2021
+# Date: 26-07-2022
 
 # Return values
 # 0: finished successfully
